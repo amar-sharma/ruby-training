@@ -55,5 +55,26 @@ class Test_rover < Minitest::Test
       @robot.move(ch,@plat)
     end
     assert_equal [2,3,'E'], [@robot.x,@robot.y,@robot.heading]
+
+    "LMMMMM".each_char do |ch|
+      @robot.move(ch,@plat)
+    end
+    assert_equal [2,5,'N'], [@robot.x,@robot.y,@robot.heading]
+
+    "LMMMMMMM".each_char do |ch|
+      @robot.move(ch,@plat)
+    end
+    assert_equal [0,5,'W'], [@robot.x,@robot.y,@robot.heading]
+
+    "LMMMMMMM".each_char do |ch|
+      @robot.move(ch,@plat)
+    end
+    assert_equal [0,0,'S'], [@robot.x,@robot.y,@robot.heading]
+
+    "LMMMMMMM".each_char do |ch|
+      @robot.move(ch,@plat)
+    end
+    assert_equal [5,0,'E'], [@robot.x,@robot.y,@robot.heading]
+
   end
 end
