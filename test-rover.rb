@@ -49,4 +49,11 @@ class Test_rover < Minitest::Test
     @robot.move('R',@plat)
     assert_equal [0,2,'N'],[@robot.x,@robot.y,@robot.heading]
   end
+
+  def test_move_on_string
+    "LMRRLMRMM".each_char do |ch|
+      @robot.move(ch,@plat)
+    end
+    assert_equal [2,3,'E'], [@robot.x,@robot.y,@robot.heading]
+  end
 end
