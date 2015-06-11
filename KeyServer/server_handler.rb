@@ -29,7 +29,7 @@ class Key_server_api
 		begin
 			new_key = SecureRandom.uuid
 			if @unblocked_keys[new_key]!=nil
-				raise StandardError, "Key already"
+				raise StandardError, "Key already exists"
 			end
 			@unblocked_keys[new_key] = [Time.now,Time.now]
 			new_key
@@ -146,7 +146,6 @@ class Key_server_api
 		@blocked_keys={}
 	end
 
-	private
 	def print_keys(keys)
 		print "\n\n######\n"
 		keys.each do |key|
@@ -157,15 +156,17 @@ class Key_server_api
 end
 
 if __FILE__ == $0
-
-	k = Key_server_api.new(15,10)
+	k = Key_server_api.new(30,100)
 	10.times { k.create_key }
 	k.print_keys(k.unblocked_keys)
-	while true
-		key = gets.chomp
-		k.block_key(key)
+  choice = 'y'
+	while choice.downcase =='y'
+    print "More? (y/n): "
+    choice=gets.chomp
+    print "Blocked Keys: "
 		k.print_keys(k.blocked_keys)
+    print "Unblocked Keys: "
 		k.print_keys(k.unblocked_keys)
-		print "\n\t Key got: #{k.get_key}"
+		print "\n\t Key got: #{k.get_key} and blocked"
 	end
 end
