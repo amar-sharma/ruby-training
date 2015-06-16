@@ -3,6 +3,10 @@ require './server_handler'
 
 handler = Key_server_api.new(30,300)
 
+get '/purge' do
+  handler.purge_all
+end
+
 get '/' do
   handler.create_key
   "Key created!"
@@ -45,4 +49,3 @@ patch '/:key' do
     "Key not available!"
   end
 end
-

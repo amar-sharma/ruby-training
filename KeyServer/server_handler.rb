@@ -1,73 +1,86 @@
 require 'securerandom'
+require 'sqlite3'
 
 class Key_server_api
-	attr_accessor :unblocked_keys,:blocked_keys
-	attr_reader :unblock_time, :delete_time
+	attr_reader :unblock_time, :delete_time, :db #db attribute reader should be removed in production
 	def initialize(unblock_time,delete_time)
-		@unblocked_keys = Hash.new
-		@blocked_keys = Hash.new
 		@unblock_time = unblock_time
 		@delete_time = delete_time
+		@db = SQLite3::Database.new "keys.db"
+		initialize_db(@db);
+		@db = SQLite3::Database.open "keys.db"
 		@mutex = Mutex.new
 		thread = Thread.new do
 			while true
 				sleep 1
-				@mutex.synchronize do
-					@blocked_keys.keys.each do |key|
-						if Time.now - @blocked_keys[key][1] > @unblock_time
-							unblock_key(key)
-						else
-							break
-						end
-					end
+					blocked_keys = db.execute("select * from blocked_keys where "+Time.now.to_i.to_s+" - blocked_at > 0")
+					blocked_keys.each do |key|
+					puts "Unblocking "+key[0]
+					unblock_key(key[0])
 				end
 			end
+		end
+	end
+
+	def initialize_db(db)
+		begin
+	    db.execute "CREATE TABLE IF NOT EXISTS unblocked_keys(key_value TEXT PRIMARY KEY, alive INTEGER)"
+	    db.execute "CREATE TABLE IF NOT EXISTS blocked_keys(key_value TEXT PRIMARY KEY, alive INTEGER, blocked_at INTEGER)"
+	    # Created 2 tables for the fact that blocked_keys will be much lesser than unblocked keys and it will not make sense to go through all keys everytime so divided computation
+	    db.execute "delete from unblocked_keys where "+Time.now.to_i.to_s+" - alive > 0"
+	    db.execute "delete from blocked_keys where "+Time.now.to_i.to_s+" - alive > 0"
+	  ensure
+	    db.close if db
 		end
 	end
 
 	def create_key
 		begin
 			new_key = SecureRandom.uuid
-			if @unblocked_keys[new_key]!=nil
-				raise StandardError, "Key already exists"
-			end
-			@unblocked_keys[new_key] = [Time.now,Time.now]
+			time = Time.now
+			stm = @db.prepare "INSERT INTO unblocked_keys VALUES(?,?)"
+    	stm.bind_param 1, new_key
+    	stm.bind_param 2, (Time.now.to_i + delete_time).to_s
+    	rs = stm.execute
 			new_key
 		rescue StandardError => e
-			retry
+		  puts "Error : "+e.message
+		  retry
 		end
 	end
 
 	def block_key(key)
 		@mutex.synchronize do
-			if(@unblocked_keys[key] != nil)
-				if (Time.now - @unblocked_keys[key][0]) > @delete_time
-					@unblocked_keys.delete(key)
-					return false
-				end
-				@blocked_keys[key] = [@unblocked_keys[key][0],Time.now]
-				@unblocked_keys.delete(key)
-				return true
-			else
-				return false
-			end
+		  entry = db.get_first_row( "select * from unblocked_keys where key_value = :key_value",
+		  	{"key_value" => key.to_s})
+		  if(entry != nil)
+		  	if(Time.now.to_i - entry[1].to_i) > 0
+		  		db.execute("Delete from unblocked_keys where key_value = :key_value",
+		  			{"key_value" => key.to_s})
+		  		return false
+		  	end		  		
+		  		db.execute("Delete from unblocked_keys where key_value = :key_value",
+		  			{"key_value" => key.to_s})
+					db.execute("INSERT INTO blocked_keys VALUES(:key_value,:alive,:block)",
+						{"key_value" => key.to_s,"alive" => entry[1],"block" => (Time.now.to_i + @unblock_time).to_s})
+		  		return true
+		  else
+		  	false
+		  end
 		end
 	end
 
 	def unblock_key(key)
 		@mutex.synchronize do
-			if(@blocked_keys[key] != nil)
-				if (Time.now - @blocked_keys[key][0]) > @delete_time
-					@blocked_keys.delete(key)
+			entry = db.get_first_row( "select * from blocked_keys where key_value = :key_value",{"key_value" => key.to_s})
+			if(entry != nil)
+				if (Time.now.to_i - entry[1].to_i) > 0
+		  		db.execute("Delete from blocked_keys where key_value = :key_value",{"key_value" => key.to_s})
 					return false
 				end
-				@unblocked_keys[key] = [@blocked_keys[key][0],Time.now]
-				@blocked_keys.delete(key)
-			elsif @unblocked_keys[key]!=nil
-				if (Time.now - @unblocked_keys[key][0]) > @delete_time
-					@unblocked_keys.delete(key)
-					return false
-				end
+					db.execute("Delete from blocked_keys where key_value = :key_value",{"key_value" => key.to_s})
+					db.execute("INSERT INTO unblocked_keys VALUES(:key_value,:alive)",{"key_value" => key.to_s,"alive" => entry[1]})
+					return true
 			else
 				return false
 			end
@@ -77,31 +90,36 @@ class Key_server_api
 
 	def delete_key(key)
 		@mutex.synchronize do
-			if @blocked_keys[key] != nil
-				@blocked_keys.delete(key)
-			elsif @unblocked_keys[key] != nil
-				@unblocked_keys.delete(key)
+			if is_available(key,'blocked_keys')
+				db.execute("Delete from blocked_keys where key_value = :key_value",{"key_value" => key.to_s})
+			elsif is_available(key,'unblocked_keys')
+				db.execute("Delete from unblocked_keys where key_value = :key_value",{"key_value" => key.to_s})
 			else
 				return false
 			end
+			true
 		end
-		true
 	end
 
 	def keep_alive(key)
 		@mutex.synchronize do
-			if(@blocked_keys[key] != nil)
-				if (Time.now - @blocked_keys[key][0]) > @delete_time
-					@blocked_keys.delete(key)
+			entry = db.get_first_row( "select * from blocked_keys where key_value = :key_value",{"key_value" => key.to_s})
+			if(entry!=nil)
+				if (Time.now.to_i - entry[1]) > 0
+					db.execute("Delete from blocked_keys where key_value = :key_value",{"key_value" => key.to_s})
 					return false
 				end
-				@blocked_keys[key][0] = Time.now
-			elsif @unblocked_keys[key]!=nil
-				if (Time.now - @unblocked_keys[key][0]) > @delete_time
-					@unblocked_keys.delete(key)
+				db.execute("update blocked_keys set alive = :alive where key_value = :key_value",
+					{"alive" => Time.now.to_i+@delete_time,"key_value" => key.to_s})
+			elsif entry = db.get_first_row( "select * from unblocked_keys where key_value = :key_value",
+				{"key_value" => key.to_s})
+				if (Time.now.to_i - entry[1]) > 0
+					db.execute("Delete from unblocked_keys where key_value = :key_value",
+						{"key_value" => key.to_s})
 					return false
 				end
-				@unblocked_keys[key][0] = Time.now
+				db.execute("update unblocked_keys set alive = :alive where key_value = :key_value",
+					{"alive" => Time.now.to_i+@delete_time,"key_value" => key.to_s})
 			else
 				return false
 			end
@@ -111,9 +129,9 @@ class Key_server_api
 
 	def get_key
 		begin
-			size = @unblocked_keys.keys.size
-			if size!=0
-				hot_key = @unblocked_keys.keys[rand(size)]
+			entry = db.get_first_row( "select * from unblocked_keys where 1")
+			if entry!=nil
+				hot_key = entry[0];
 				if !block_key(hot_key)
 					raise ArgumentError, " Key is Expired!"
 				end
@@ -126,47 +144,56 @@ class Key_server_api
 		end
 	end
 
+	def print_keys(keys)
+		puts "\n\n######  \n"
+		stm = @db.prepare "SELECT * FROM "+keys
+		rs = stm.execute
+		rs.each do |row|
+        puts row.join "\s"
+    end
+		print "\n\n######\n"
+	end
+
+	def is_available(key,table)
+		return @db.get_first_value("select count(*) from "+table+" where key_value = :k",{"k" => key}) == 1
+	end
+
 	# Test helper method to simulate auto unblock by increasing key's age
 	def simulate_auto_unblock(key,sec)
-		@blocked_keys[key][1] -= sec
+		db.query("update blocked_keys set blocked_at = blocked_at + #{sec} where key_value = '#{key}'")
 	end
 
 	# Test helper method to simulate auto delete by increasing key's age
 	def simulate_auto_delete(key,sec)
-		if @unblocked_keys[key]!=nil
-			@unblocked_keys[key][0] -= sec
-		elsif @blocked_keys[key]!=nil
-			@blocked_keys[key][0] -= sec
-		end
+		db.query("update blocked_keys set alive = alive+#{sec} where key_value = '#{key}'");
+		db.query("update unblocked_keys set alive = alive+#{sec} where key_value = '#{key}'")
 	end
 
 	# Test helper to purge all keys
 	def purge_all
-		@unblocked_keys={}
-		@blocked_keys={}
+		db.execute "delete from unblocked_keys where 1"
+	  db.execute "delete from blocked_keys where 1"
 	end
 
-	def print_keys(keys)
-		print "\n\n######\n"
-		keys.each do |key|
-			puts key
-		end
-		print "\n\n######\n"
-	end
 end
 
 if __FILE__ == $0
-	k = Key_server_api.new(30,100)
+	auto_unblock_time = 10;
+	auto_delete_time = 20;
+	k = Key_server_api.new(auto_unblock_time,auto_delete_time)
+	puts "\n\n \t Key Server started with auto_delete_time = #{auto_delete_time} and auto_unblock_time = #{auto_unblock_time} \n\n"
 	10.times { k.create_key }
-	k.print_keys(k.unblocked_keys)
   choice = 'y'
 	while choice.downcase =='y'
-    print "More? (y/n): "
-    choice=gets.chomp
     print "Blocked Keys: "
-		k.print_keys(k.blocked_keys)
-    print "Unblocked Keys: "
-		k.print_keys(k.unblocked_keys)
-		print "\n\t Key got: #{k.get_key} and blocked"
+	 	k.print_keys('blocked_keys')
+ 		print "Unblocked Keys: "
+		k.print_keys('unblocked_keys')		
+	  print "\n\t Key got: #{k.get_key} and blocked\n"
+	  puts "UnBlock it: ";
+		bkey = gets.chomp
+    k.unblock_key(bkey)
+		print "More? (y/n): "
+    choice=gets.chomp
 	end
 end

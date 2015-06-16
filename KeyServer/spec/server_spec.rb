@@ -1,6 +1,9 @@
 require "spec_helper"
 require 'json'
 describe "server", :server => true do
+  before(:all) do
+    get "/purge"
+  end
   include Rack::Test::Methods
   it "throws 404 when keys are asked without creation" do
     get "/key"
