@@ -1,28 +1,7 @@
 require 'bundler/setup'
 require 'securerandom'
 require 'sqlite3'
-
-module CheckExpiry
-
-  def is_unblocked_expired?(entry)
-    if(Time.now.to_i - entry[1].to_i) > 0
-      db.execute("Delete from unblocked_keys where key_value = :key_value",
-                 {"key_value" => key.to_s})
-      return false
-    end
-  end
-
-  def is_blocked_expired?(entry)
-    if(Time.now.to_i - entry[1].to_i) > 0
-      db.execute("Delete from blocked_keys where key_value = :key_value",
-                 {"key_value" => key.to_s})
-      return false
-    end
-  end
-
-  module_function :is_blocked_expired?, :is_unblocked_expired?
-
-end
+require './expiry_module'
 
 class KeyServerAPI
   include CheckExpiry
@@ -65,12 +44,10 @@ class KeyServerAPI
     begin
       new_key = SecureRandom.uuid
       time = Time.now
-
       stm = @db.prepare "INSERT INTO unblocked_keys VALUES(?,?)"
       stm.bind_param 1, new_key
       stm.bind_param 2, (Time.now.to_i + delete_time).to_s
       rs = stm.execute
-
       new_key
     rescue StandardError => e
       puts "Error : "+e.message
@@ -185,12 +162,13 @@ class KeyServerAPI
   # Test helper method to simulate auto unblock by increasing key's age
   def simulate_auto_unblock(key,sec)
     db.query("update blocked_keys set blocked_at = blocked_at + #{sec} where key_value = '#{key}'")
+    db.query("update blocked_keys set blocked_at = blocked_at-#{sec} where key_value = '#{key}'")
   end
 
   # Test helper method to simulate auto delete by increasing key's age
   def simulate_auto_delete(key,sec)
-    db.query("update blocked_keys set alive = alive+#{sec} where key_value = '#{key}'");
-    db.query("update unblocked_keys set alive = alive+#{sec} where key_value = '#{key}'")
+    db.query("update blocked_keys set alive = alive-#{sec} where key_value = '#{key}'");
+    db.query("update unblocked_keys set alive = alive-#{sec} where key_value = '#{key}'")
   end
 
   # Test helper to purge all keys
@@ -200,6 +178,8 @@ class KeyServerAPI
   end
 
 end
+
+## To run standalone
 
 if __FILE__ == $0
 
