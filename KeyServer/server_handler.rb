@@ -2,8 +2,32 @@ require 'bundler/setup'
 require 'securerandom'
 require 'sqlite3'
 
+module CheckExpiry
+
+  def is_unblocked_expired?(entry)
+    if(Time.now.to_i - entry[1].to_i) > 0
+      db.execute("Delete from unblocked_keys where key_value = :key_value",
+                 {"key_value" => key.to_s})
+      return false
+    end
+  end
+
+  def is_blocked_expired?(entry)
+    if(Time.now.to_i - entry[1].to_i) > 0
+      db.execute("Delete from blocked_keys where key_value = :key_value",
+                 {"key_value" => key.to_s})
+      return false
+    end
+  end
+
+  module_function :is_blocked_expired?, :is_unblocked_expired?
+
+end
+
 class KeyServerAPI
+  include CheckExpiry
   attr_reader :unblock_time, :delete_time, :db #db attribute reader should be removed in production
+
   def initialize(unblock_time,delete_time)
     @unblock_time = unblock_time
     @delete_time = delete_time
@@ -11,6 +35,7 @@ class KeyServerAPI
     initialize_db(@db);
     @db = SQLite3::Database.open "keys.db"
     @mutex = Mutex.new
+
     thread = Thread.new do
       while true
         sleep 1
@@ -20,6 +45,7 @@ class KeyServerAPI
         end
       end
     end
+
   end
 
   def initialize_db(db)
@@ -39,10 +65,12 @@ class KeyServerAPI
     begin
       new_key = SecureRandom.uuid
       time = Time.now
+
       stm = @db.prepare "INSERT INTO unblocked_keys VALUES(?,?)"
       stm.bind_param 1, new_key
       stm.bind_param 2, (Time.now.to_i + delete_time).to_s
       rs = stm.execute
+
       new_key
     rescue StandardError => e
       puts "Error : "+e.message
@@ -54,12 +82,8 @@ class KeyServerAPI
     @mutex.synchronize do
       entry = db.get_first_row( "select * from unblocked_keys where key_value = :key_value",
                                 {"key_value" => key.to_s})
-      if(entry != nil)
-        if(Time.now.to_i - entry[1].to_i) > 0
-          db.execute("Delete from unblocked_keys where key_value = :key_value",
-                     {"key_value" => key.to_s})
-          return false
-        end
+      if(entry)
+        return false if CheckExpiry.is_unblocked_expired?(entry)
         db.execute("Delete from unblocked_keys where key_value = :key_value",
                    {"key_value" => key.to_s})
         db.execute("INSERT INTO blocked_keys VALUES(:key_value,:alive,:block)",
@@ -73,14 +97,14 @@ class KeyServerAPI
 
   def unblock_key(key)
     @mutex.synchronize do
-      entry = db.get_first_row( "select * from blocked_keys where key_value = :key_value",{"key_value" => key.to_s})
-      if(entry != nil)
-        if (Time.now.to_i - entry[1].to_i) > 0
-          db.execute("Delete from blocked_keys where key_value = :key_value",{"key_value" => key.to_s})
-          return false
-        end
-        db.execute("Delete from blocked_keys where key_value = :key_value",{"key_value" => key.to_s})
-        db.execute("INSERT INTO unblocked_keys VALUES(:key_value,:alive)",{"key_value" => key.to_s,"alive" => entry[1]})
+      entry = db.get_first_row( "select * from blocked_keys where key_value = :key_value",
+                                {"key_value" => key.to_s})
+      if(entry)
+        return false if CheckExpiry.is_blocked_expired?(entry)
+        db.execute("Delete from blocked_keys where key_value = :key_value",
+                   {"key_value" => key.to_s})
+        db.execute("INSERT INTO unblocked_keys VALUES(:key_value,:alive)",
+                   {"key_value" => key.to_s,"alive" => entry[1]})
         return true
       else
         return false
@@ -91,10 +115,12 @@ class KeyServerAPI
 
   def delete_key(key)
     @mutex.synchronize do
-      if is_available(key,'blocked_keys')
-        db.execute("Delete from blocked_keys where key_value = :key_value",{"key_value" => key.to_s})
-      elsif is_available(key,'unblocked_keys')
-        db.execute("Delete from unblocked_keys where key_value = :key_value",{"key_value" => key.to_s})
+      if is_available?(key,'blocked_keys')
+        db.execute("Delete from blocked_keys where key_value = :key_value",
+                   {"key_value" => key.to_s})
+      elsif is_available?(key,'unblocked_keys')
+        db.execute("Delete from unblocked_keys where key_value = :key_value",
+                   {"key_value" => key.to_s})
       else
         return false
       end
@@ -104,20 +130,17 @@ class KeyServerAPI
 
   def keep_alive(key)
     @mutex.synchronize do
-      entry = db.get_first_row( "select * from blocked_keys where key_value = :key_value",{"key_value" => key.to_s})
-      if(entry!=nil)
-        if (Time.now.to_i - entry[1]) > 0
-          db.execute("Delete from blocked_keys where key_value = :key_value",{"key_value" => key.to_s})
-          return false
-        end
+      entry = db.get_first_row( "select * from blocked_keys where key_value = :key_value",
+                                {"key_value" => key.to_s})
+      if(entry)
+        return false if CheckExpiry.is_blocked_expired?(entry)
+
         db.execute("update blocked_keys set alive = :alive where key_value = :key_value",
                    {"alive" => Time.now.to_i+@delete_time,"key_value" => key.to_s})
       elsif entry = db.get_first_row( "select * from unblocked_keys where key_value = :key_value",
                                       {"key_value" => key.to_s})
-        if (Time.now.to_i - entry[1]) > 0
-          db.execute("Delete from unblocked_keys where key_value = :key_value",
-                     {"key_value" => key.to_s})
-          return false
+        if(entry)
+          return false if CheckExpiry.is_unblocked_expired?(entry)
         end
         db.execute("update unblocked_keys set alive = :alive where key_value = :key_value",
                    {"alive" => Time.now.to_i+@delete_time,"key_value" => key.to_s})
@@ -155,7 +178,7 @@ class KeyServerAPI
     print "\n\n######\n"
   end
 
-  def is_available(key,table)
+  def is_available?(key,table)
     return @db.get_first_value("select count(*) from "+table+" where key_value = :k",{"k" => key}) == 1
   end
 
@@ -179,6 +202,7 @@ class KeyServerAPI
 end
 
 if __FILE__ == $0
+
   auto_unblock_time = 10;
   auto_delete_time = 20;
   k = KeyServerAPI.new(auto_unblock_time,auto_delete_time)
@@ -186,6 +210,7 @@ if __FILE__ == $0
    and auto_unblock_time = #{auto_unblock_time} \n\n")
   10.times { k.create_key }
   choice = 'y'
+
   while choice.downcase =='y'
     print "Blocked Keys: "
     k.print_keys('blocked_keys')
@@ -198,4 +223,5 @@ if __FILE__ == $0
     print "More? (y/n): "
     choice=gets.chomp
   end
+
 end

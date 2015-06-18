@@ -10,50 +10,60 @@ describe KeyServerAPI, :helper => true  do
   end
 
   describe '#initialize' do
+
     it "sets time" do
       expect(@server.unblock_time).to equal(10)
       expect(@server.delete_time).to equal(100)
     end
+
   end
 
   describe '#create_key' do
+
     it "generates key" do
       expect(@server.db.get_first_value("Select count(*) from unblocked_keys")).to eq(1)
     end
+
     it "creates random key" do
       expect(@server.create_key).to_not equal(@server.create_key)
     end
+
   end
 
   describe '#delete_key' do
+
     it "deletes an unblocked key" do
       deleting_key = @server.db.get_first_value("Select * from unblocked_keys")
       expect(@server.delete_key(deleting_key)).to be true
-      expect(@server.is_available(deleting_key,'unblocked_keys')).to be false
+      expect(@server.is_available?(deleting_key,'unblocked_keys')).to be false
     end
 
     it "deletes a blocked key" do
       deleting_key = @server.db.get_first_value("Select * from unblocked_keys")
       @server.block_key(deleting_key)
       expect(@server.delete_key(deleting_key)).to be true
-      expect(@server.is_available(deleting_key,'blocked_keys')).to be false
+      expect(@server.is_available?(deleting_key,'blocked_keys')).to be false
     end
     it "checks for non-existing key" do
       expect(@server.delete_key("asdmsadnsadadsadas897xawa")).to be false
     end
+
   end
 
   describe '#block_key' do
+
     it "blocks given key" do
       blocking_key = @server.db.get_first_value("Select * from unblocked_keys")
       expect(@server.block_key(blocking_key)).to be true
-      expect(@server.is_available(blocking_key,'blocked_keys')).to be true
-      expect(@server.is_available(blocking_key,'unblocked_keys')).to be false
+      expect(@server.is_available?(blocking_key,'blocked_keys')).to be true
+      expect(@server.is_available?(blocking_key,'unblocked_keys')).to be false
     end
+
     it "can't block already blocked key" do
       blocking_key = @server.db.get_first_value("Select * from blocked_keys")
       expect(@server.block_key(blocking_key)).to be false
     end
+
     it "can't block a deleted key" do
       deleted_key = @server.db.get_first_value("Select * from unblocked_keys")
       @server.delete_key(deleted_key)
@@ -63,16 +73,19 @@ describe KeyServerAPI, :helper => true  do
     it "can't block an invalid key" do
       expect(@server.block_key("adssadasdasas9e3e23e2asdas")).to be false
     end
+
   end
 
   describe "#unblock_key" do
+
     it "unblocks a key" do
       blocking_key = @server.db.get_first_value("Select * from unblocked_keys")
       @server.block_key(blocking_key)
       expect(@server.unblock_key(blocking_key)).to be true
-      expect(@server.is_available(blocking_key,'unblocked_keys')).to be true
-      expect(@server.is_available(blocking_key,'blocked_keys')).to be false
+      expect(@server.is_available?(blocking_key,'unblocked_keys')).to be true
+      expect(@server.is_available?(blocking_key,'blocked_keys')).to be false
     end
+
     it "can't unblock a deleted key" do
       deleting_key = @server.db.get_first_value("Select * from unblocked_keys")
       @server.delete_key(deleting_key)
@@ -85,6 +98,7 @@ describe KeyServerAPI, :helper => true  do
   end
 
   describe "#keep_alive" do
+
     it "keeps an unblocked key alive" do
       alive_key = @server.db.get_first_value("Select * from unblocked_keys")
       expect(@server.keep_alive(alive_key)).to be true
@@ -101,9 +115,10 @@ describe KeyServerAPI, :helper => true  do
       deleting_key = @server.db.get_first_value("Select * from unblocked_keys")
       @server.delete_key(deleting_key)
       expect(@server.keep_alive(deleting_key)).to be false
-      expect(@server.is_available(deleting_key,'unblocked_keys')).to be false
-      expect(@server.is_available(deleting_key,'blocked_keys')).to be false
+      expect(@server.is_available?(deleting_key,'unblocked_keys')).to be false
+      expect(@server.is_available?(deleting_key,'blocked_keys')).to be false
     end
+
   end
 
   describe "#get_key" do
@@ -115,8 +130,8 @@ describe KeyServerAPI, :helper => true  do
     it "gets random key from unblocked_keys and blocks it" do
       got_key = @server.get_key
       expect(got_key).to_not eq("403")
-      expect(@server.is_available(got_key,'unblocked_keys')).to be false
-      expect(@server.is_available(got_key,'blocked_keys')).to be true
+      expect(@server.is_available?(got_key,'unblocked_keys')).to be false
+      expect(@server.is_available?(got_key,'blocked_keys')).to be true
     end
 
     it "doesn't give a blocked_key" do
@@ -160,5 +175,7 @@ describe KeyServerAPI, :helper => true  do
       sleep 1
       expect(@server.get_key).to_not eq("403")
     end
+
   end
+
 end
