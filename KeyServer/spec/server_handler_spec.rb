@@ -1,15 +1,15 @@
-describe Key_server_api, :helper => true  do
-  
+describe KeyServerAPI, :helper => true  do
+
   before(:all) do
-    @server = Key_server_api.new(10,100)
+    @server = KeyServerAPI.new(10,100)
   end
 
   before(:each) do
     @server.purge_all
-    20.times {@server.create_key}
+    @server.create_key
   end
 
-  describe '#initialize' do 
+  describe '#initialize' do
     it "sets time" do
       expect(@server.unblock_time).to equal(10)
       expect(@server.delete_time).to equal(100)
@@ -18,10 +18,8 @@ describe Key_server_api, :helper => true  do
 
   describe '#create_key' do
     it "generates key" do
-      @server.purge_all
-      @server.create_key
-      expect(@server.db.get_first_value("Select count(*) from unblocked_keys")).to eq(1);
-  	end
+      expect(@server.db.get_first_value("Select count(*) from unblocked_keys")).to eq(1)
+    end
     it "creates random key" do
       expect(@server.create_key).to_not equal(@server.create_key)
     end
@@ -29,8 +27,6 @@ describe Key_server_api, :helper => true  do
 
   describe '#delete_key' do
     it "deletes an unblocked key" do
-      @server.purge_all
-      @server.create_key
       deleting_key = @server.db.get_first_value("Select * from unblocked_keys")
       expect(@server.delete_key(deleting_key)).to be true
       expect(@server.is_available(deleting_key,'unblocked_keys')).to be false
@@ -50,7 +46,7 @@ describe Key_server_api, :helper => true  do
   describe '#block_key' do
     it "blocks given key" do
       blocking_key = @server.db.get_first_value("Select * from unblocked_keys")
-      expect(@server.block_key(blocking_key)).to be true 
+      expect(@server.block_key(blocking_key)).to be true
       expect(@server.is_available(blocking_key,'blocked_keys')).to be true
       expect(@server.is_available(blocking_key,'unblocked_keys')).to be false
     end
@@ -60,7 +56,7 @@ describe Key_server_api, :helper => true  do
     end
     it "can't block a deleted key" do
       deleted_key = @server.db.get_first_value("Select * from unblocked_keys")
-      @server.delete_key(deleted_key);
+      @server.delete_key(deleted_key)
       expect(@server.block_key(deleted_key)).to be false
     end
 

@@ -1,7 +1,8 @@
+require 'bundler/setup'
 require 'sinatra'
 require './server_handler'
 
-handler = Key_server_api.new(30,300)
+handler = KeyServerAPI.new(30,300)
 
 get '/purge' do
   handler.purge_all
