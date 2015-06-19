@@ -1,8 +1,12 @@
 require 'bundler/setup'
 require 'sinatra'
 require './server_handler'
+require './expiry_module'
 
-handler = KeyServerAPI.new(30,300)
+delete_time = 300;
+unblock_time = 30;
+
+handler = KeyServerAPI.new(unblock_time,delete_time)
 
 get '/purge' do
   handler.purge_all

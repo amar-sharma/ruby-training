@@ -60,7 +60,7 @@ class KeyServerAPI
       entry = db.get_first_row( "select * from unblocked_keys where key_value = :key_value",
                                 {"key_value" => key.to_s})
       if(entry)
-        return false if CheckExpiry.is_unblocked_expired?(entry)
+        return false if CheckExpiry.is_unblocked_expired?(entry,db)
         db.execute("Delete from unblocked_keys where key_value = :key_value",
                    {"key_value" => key.to_s})
         db.execute("INSERT INTO blocked_keys VALUES(:key_value,:alive,:block)",
@@ -77,7 +77,7 @@ class KeyServerAPI
       entry = db.get_first_row( "select * from blocked_keys where key_value = :key_value",
                                 {"key_value" => key.to_s})
       if(entry)
-        return false if CheckExpiry.is_blocked_expired?(entry)
+        return false if CheckExpiry.is_blocked_expired?(entry,db)
         db.execute("Delete from blocked_keys where key_value = :key_value",
                    {"key_value" => key.to_s})
         db.execute("INSERT INTO unblocked_keys VALUES(:key_value,:alive)",
@@ -110,14 +110,14 @@ class KeyServerAPI
       entry = db.get_first_row( "select * from blocked_keys where key_value = :key_value",
                                 {"key_value" => key.to_s})
       if(entry)
-        return false if CheckExpiry.is_blocked_expired?(entry)
+        return false if CheckExpiry.is_blocked_expired?(entry,db)
 
         db.execute("update blocked_keys set alive = :alive where key_value = :key_value",
                    {"alive" => Time.now.to_i+@delete_time,"key_value" => key.to_s})
       elsif entry = db.get_first_row( "select * from unblocked_keys where key_value = :key_value",
                                       {"key_value" => key.to_s})
         if(entry)
-          return false if CheckExpiry.is_unblocked_expired?(entry)
+          return false if CheckExpiry.is_unblocked_expired?(entry,db)
         end
         db.execute("update unblocked_keys set alive = :alive where key_value = :key_value",
                    {"alive" => Time.now.to_i+@delete_time,"key_value" => key.to_s})
@@ -161,7 +161,6 @@ class KeyServerAPI
 
   # Test helper method to simulate auto unblock by increasing key's age
   def simulate_auto_unblock(key,sec)
-    db.query("update blocked_keys set blocked_at = blocked_at + #{sec} where key_value = '#{key}'")
     db.query("update blocked_keys set blocked_at = blocked_at-#{sec} where key_value = '#{key}'")
   end
 
@@ -175,33 +174,6 @@ class KeyServerAPI
   def purge_all
     db.execute "delete from unblocked_keys where 1"
     db.execute "delete from blocked_keys where 1"
-  end
-
-end
-
-## To run standalone
-
-if __FILE__ == $0
-
-  auto_unblock_time = 10;
-  auto_delete_time = 20;
-  k = KeyServerAPI.new(auto_unblock_time,auto_delete_time)
-  puts %Q("\n\n \t Key Server started with auto_delete_time = #{auto_delete_time}
-   and auto_unblock_time = #{auto_unblock_time} \n\n")
-  10.times { k.create_key }
-  choice = 'y'
-
-  while choice.downcase =='y'
-    print "Blocked Keys: "
-    k.print_keys('blocked_keys')
-    print "Unblocked Keys: "
-    k.print_keys('unblocked_keys')
-    print "\n\t Key got: #{k.get_key} and blocked\n"
-    puts "UnBlock it: ";
-    bkey = gets.chomp
-    k.unblock_key(bkey)
-    print "More? (y/n): "
-    choice=gets.chomp
   end
 
 end
