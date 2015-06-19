@@ -3,7 +3,7 @@ cd KeyServer
 bundle install
 
 Run server using:
-ruby server.rb
+bundle exec ruby server.rb
 
 Test
 bundle exec rspec -fd
